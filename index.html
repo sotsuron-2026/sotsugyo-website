@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>アンケート参加用 ID発行ゲートウェイ</title>
+  <style>
+    :root {
+      --primary-color: #1a73e8;
+      --primary-hover: #1557b0;
+      --bg-color: #f8f9fa;
+      --card-bg: #ffffff;
+      --text-color: #202124;
+      --sub-text: #5f6368;
+      --border-color: #dadce0;
+      --error-color: #d93025;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .container {
+      background-color: var(--card-bg);
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 40px;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+      border: 1px solid var(--border-color);
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 8px;
+      color: var(--text-color);
+    }
+    .description {
+      font-size: 14px;
+      color: var(--sub-text);
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+    .id-box {
+      background-color: #e8f0fe;
+      border: 2px dashed var(--primary-color);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .id-label {
+      font-size: 12px;
+      color: var(--sub-text);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .id-value {
+      font-size: 36px;
+      font-weight: bold;
+      color: var(--primary-color);
+      letter-spacing: 2px;
+    }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      box-sizing: border-box;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background-color: var(--primary-color);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background-color: var(--primary-hover);
+    }
+    .btn-primary:disabled {
+      background-color: #bdc1c6;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background-color: #34a853;
+      color: #fff;
+      margin-top: 12px;
+    }
+    .btn-secondary:hover {
+      background-color: #2d9247;
+    }
+    .hidden {
+      display: none;
+    }
+    .error-msg {
+      color: var(--error-color);
+      font-size: 14px;
+      margin-top: 12px;
+    }
+  </style>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <h1>卒論アンケート ID発行ポータル</h1>
+  <p class="description">
+    ボタンを押すとあなた専用の識別IDが発行されます。<br>
+    発行されたIDをメモまたはコピーの上、アンケートフォームへお進みください。
+  </p>
+
+  <div id="section-generate">
+    <button id="btn-issue" class="btn btn-primary" onclick="issueID()">IDを発行する</button>
+  </div>
+
+  <div id="section-result" class="hidden">
+    <div class="id-box">
+      <div class="id-label">あなたの参加ID</div>
+      <div id="id-display" class="id-value">----</div>
+    </div>
+    <p class="description" style="font-size: 13px; color: var(--error-color);">
+      ※このIDはアンケート画面の最初の設問で入力が必要となります。
+    </p>
+    <!-- GoogleフォームのURLに置き換えてください -->
+    <a id="btn-form" href="https://forms.gle/xqRi9dvGtYQ2CfNY6" target="_blank" class="btn btn-secondary">
+      アンケート回答フォームに進む
+    </a>
+  </div>
+
+  <div id="error-message" class="error-msg hidden"></div>
+</div>
+
+<script>
+  // Firebase 設定情報（ご自身のFirebaseプロジェクトの設定に置き換えてご利用ください）
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+
+  // Firebaseの初期化
+  if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+  }
+  const db = firebase.database();
+
+  function issueID() {
+    const btn = document.getElementById('btn-issue');
+    btn.disabled = true;
+    btn.innerText = "発行中...";
+
+    const counterRef = db.ref('current_id_counter');
+
+    // 0200 〜 0500 までの安全な連番発行処理（トランザクション）
+    counterRef.transaction((currentValue) => {
+      if (currentValue === null) {
+        return 200; // 初期値 0200
+      }
+      if (currentValue >= 500) {
+        return; // 0500到達時は更新停止
+      }
+      return currentValue + 1;
+    }, (error, committed, snapshot) => {
+      if (error) {
+        showError("エラーが発生しました。再度お試しください。");
+        btn.disabled = false;
+        btn.innerText = "IDを発行する";
+      } else if (!committed) {
+        showError("申し訳ありません。回答者数の上限（0500）に達したため発行できません。");
+        btn.innerText = "受付終了";
+      } else {
+        const generatedNum = snapshot.val();
+        // 4桁の文字列にフォーマット (例: 0200)
+        const formattedID = String(generatedNum).padStart(4, '0');
+
+        document.getElementById('id-display').innerText = formattedID;
+        document.getElementById('section-generate').classList.add('hidden');
+        document.getElementById('section-result').classList.remove('hidden');
+      }
+    });
+  }
+
+  function showError(msg) {
+    const errDiv = document.getElementById('error-message');
+    errDiv.innerText = msg;
+    errDiv.classList.remove('hidden');
+  }
+</script>
+
+</body>
+</html>
